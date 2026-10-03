@@ -26,6 +26,18 @@ func SetSecret(data []byte) *Secret {
 	return s
 }
 
+// Zero overwrites b in place. It is the wipe every caller outside this package
+// should use — the CLI on a password buffer, the daemon on a decoded request.
+//
+// Best effort: Go has no explicit_bzero, and KeepAlive is the closest thing to
+// an optimisation barrier available.
+func Zero(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
+	runtime.KeepAlive(b)
+}
+
 // GetSecret returns the underlying bytes without copying. The slice is valid
 // only until ClearSecret is called.
 func (s *Secret) GetSecret() []byte {

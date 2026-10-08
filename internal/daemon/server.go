@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/chetankar/openpass/internal/client"
 )
 
 /*
@@ -35,6 +37,7 @@ type RequestData struct {
 	Id      int             `json:"id"`
 	Method  string          `json:"method"`
 	Params  json.RawMessage `json:"params"`
+	Auth    *client.Auth    `json:"auth,omitempty"`
 }
 
 type ResponseData struct {
@@ -54,6 +57,7 @@ type ErrorData struct {
 type Server struct {
 	socketPath string
 	session    *Session
+	registry   *Registry
 	listener   net.Listener
 }
 
@@ -62,8 +66,17 @@ func NewServer(socketPath, vaultPath string, idleTimeout time.Duration) (*Server
 	if err != nil {
 		return nil, err
 	}
-	return &Server{socketPath: socketPath, session: session}, nil
+
+	registry, err := NewRegistry(filepath.Join(filepath.Dir(vaultPath), "clients.json"))
+	if err != nil {
+		session.Close()
+		return nil, err
+	}
+
+	return &Server{socketPath: socketPath, session: session, registry: registry}, nil
 }
+
+func (s *Server) Registry() *Registry { return s.registry }
 
 // Listen creates the socket. It is separate from Serve so callers (and tests)
 // know the socket exists before anything tries to connect.
@@ -78,6 +91,12 @@ func (s *Server) Listen() error {
 	// two daemons running.
 	if err := os.Remove(s.socketPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("failed to remove the existing socket: %w", err)
+	}
+
+	// sun_path is 104 bytes on darwin, 108 on linux, and exceeding it fails
+	// with a bare "invalid argument".
+	if len(s.socketPath) >= 104 {
+		return fmt.Errorf("socket path is %d bytes, over the 103 the OS allows: %s", len(s.socketPath), s.socketPath)
 	}
 
 	listener, err := net.Listen("unix", s.socketPath)
@@ -153,7 +172,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 		log.Printf("request id=%d method=%s", request.Id, request.Method)
 
 		response := ResponseData{Jsonrpc: "2.0", Id: request.Id}
-		result, rerr := s.session.Dispatch(request)
+		result, rerr := s.dispatch(request)
 		if rerr != nil {
 			response.Error = &ErrorData{Code: rerr.Code, Message: rerr.Message}
 			log.Printf("request id=%d failed: %d %s", request.Id, rerr.Code, rerr.Message)

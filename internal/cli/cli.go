@@ -32,10 +32,11 @@ const (
 )
 
 type app struct {
-	socketPath string
-	vaultPath  string
-	stdout     io.Writer
-	stderr     io.Writer
+	socketPath   string
+	vaultPath    string
+	identityPath string
+	stdout       io.Writer
+	stderr       io.Writer
 }
 
 const usage = `openpass — a local password manager
@@ -52,10 +53,12 @@ Commands:
   add <name>           add an entry
   get <name|id>        read an entry's password
   rm <name|id>         delete an entry
+  client               manage paired clients
 
 Global flags:
   -socket <path>       daemon socket (default ~/.openpass/run/openpassd.sock)
   -vault <path>        vault file, used when starting the daemon
+  -identity <path>     client identity key (default ~/.openpass/client.key)
 
 Run "openpass <command> -h" for a command's flags.
 `
@@ -70,10 +73,11 @@ func Main(args []string) int {
 	base := filepath.Join(home, ".openpass")
 
 	a := &app{
-		socketPath: filepath.Join(base, "run", "openpassd.sock"),
-		vaultPath:  filepath.Join(base, "vault.opv"),
-		stdout:     os.Stdout,
-		stderr:     os.Stderr,
+		socketPath:   filepath.Join(base, "run", "openpassd.sock"),
+		vaultPath:    filepath.Join(base, "vault.opv"),
+		identityPath: filepath.Join(base, "client.key"),
+		stdout:       os.Stdout,
+		stderr:       os.Stderr,
 	}
 
 	// Global flags may appear before the command.
@@ -81,6 +85,7 @@ func Main(args []string) int {
 	global.SetOutput(a.stderr)
 	global.StringVar(&a.socketPath, "socket", a.socketPath, "daemon socket path")
 	global.StringVar(&a.vaultPath, "vault", a.vaultPath, "vault file path")
+	global.StringVar(&a.identityPath, "identity", a.identityPath, "client identity key path")
 	global.Usage = func() { fmt.Fprint(a.stderr, usage) }
 
 	if err := global.Parse(args); err != nil {
@@ -112,6 +117,8 @@ func Main(args []string) int {
 		runErr = a.cmdGet(commandArgs)
 	case "rm", "remove", "delete":
 		runErr = a.cmdRemove(commandArgs)
+	case "client":
+		runErr = a.cmdClient(commandArgs)
 	case "help", "-h", "--help":
 		fmt.Fprint(a.stdout, usage)
 		return ExitOK
@@ -178,9 +185,28 @@ func (a *app) report(err error) int {
 	}
 }
 
-// connect dials the daemon, starting it if necessary.
+// connect dials the daemon, starting it if necessary, and attaches this
+// machine's CLI identity so every request is signed.
 func (a *app) connect() (*client.Client, error) {
-	return client.DialOrSpawn(a.socketPath, a.vaultPath, client.FindDaemonBinary())
+	c, err := client.DialOrSpawn(a.socketPath, a.vaultPath, client.FindDaemonBinary())
+	if err != nil {
+		return nil, err
+	}
+
+	identity, err := client.LoadOrCreateIdentity(a.identityPath, "openpass CLI", "cli")
+	if err != nil {
+		c.Close()
+		return nil, err
+	}
+	c.SetIdentity(identity)
+
+	// Registering is idempotent, so doing it unconditionally keeps first run
+	// and every later run on the same path.
+	if _, err := c.Pair(); err != nil {
+		c.Close()
+		return nil, fmt.Errorf("failed to register this client: %w", err)
+	}
+	return c, nil
 }
 
 // withUnlocked runs fn, and if the vault turns out to be locked, prompts for

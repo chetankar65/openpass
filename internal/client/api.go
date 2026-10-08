@@ -1,6 +1,7 @@
 package client
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -176,4 +177,53 @@ func hasPrefixFold(s, pre string) bool {
 }
 func containsFold(s, sub string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(sub))
+}
+
+type ClientRecord struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Kind   string `json:"kind"`
+	State  string `json:"state"`
+	Policy struct {
+		Reveal string `json:"reveal"`
+	} `json:"policy"`
+	LastSeen string `json:"last_seen,omitempty"`
+}
+
+type PairResult struct {
+	ClientID string `json:"client_id"`
+	State    string `json:"state"`
+	Code     string `json:"code,omitempty"`
+}
+
+// Pair registers this client's identity. Unauthenticated by necessity.
+func (c *Client) Pair() (PairResult, error) {
+	var out PairResult
+	if c.identity == nil {
+		return out, errors.New("no identity to pair")
+	}
+	err := c.call("client.pair", map[string]any{
+		"name":   c.identity.Name,
+		"kind":   c.identity.Kind,
+		"pubkey": []byte(c.identity.PublicKey()),
+	}, &out)
+	return out, err
+}
+
+func (c *Client) ListClients() ([]ClientRecord, error) {
+	var out struct {
+		Clients []ClientRecord `json:"clients"`
+	}
+	err := c.call("client.list", nil, &out)
+	return out.Clients, err
+}
+
+func (c *Client) ApproveClient(code string) (ClientRecord, error) {
+	var out ClientRecord
+	err := c.call("client.approve", map[string]any{"code": code}, &out)
+	return out, err
+}
+
+func (c *Client) RevokeClient(id string) error {
+	return c.call("client.revoke", map[string]any{"id": id}, nil)
 }

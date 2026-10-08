@@ -44,10 +44,11 @@ func IsCode(err error, code int) bool {
 }
 
 type request struct {
-	Jsonrpc string `json:"jsonrpc"`
-	Id      int    `json:"id"`
-	Method  string `json:"method"`
-	Params  any    `json:"params,omitempty"`
+	Jsonrpc string          `json:"jsonrpc"`
+	Id      int             `json:"id"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params,omitempty"`
+	Auth    *Auth           `json:"auth,omitempty"`
 }
 
 type response struct {
@@ -59,11 +60,17 @@ type response struct {
 
 // Client is a connection to the daemon.
 type Client struct {
-	conn   net.Conn
-	enc    *json.Encoder
-	dec    *json.Decoder
-	nextID int
+	conn     net.Conn
+	enc      *json.Encoder
+	dec      *json.Decoder
+	nextID   int
+	identity *Identity
 }
+
+// SetIdentity makes the client sign its requests.
+func (c *Client) SetIdentity(id *Identity) { c.identity = id }
+
+func (c *Client) Identity() *Identity { return c.identity }
 
 // Dial connects to the daemon at socketPath.
 func Dial(socketPath string) (*Client, error) {
@@ -145,7 +152,28 @@ func (c *Client) call(method string, params, out any) error {
 	c.nextID++
 	id := c.nextID
 
-	if err := c.enc.Encode(request{Jsonrpc: "2.0", Id: id, Method: method, Params: params}); err != nil {
+	var raw json.RawMessage
+	if params != nil {
+		encoded, err := json.Marshal(params)
+		if err != nil {
+			return fmt.Errorf("failed to encode params for %s: %w", method, err)
+		}
+		raw = encoded
+	}
+
+	req := request{Jsonrpc: "2.0", Id: id, Method: method, Params: raw}
+
+	// Signed with the exact bytes that go on the wire, so the daemon verifies
+	// what it actually received.
+	if c.identity != nil {
+		auth, err := c.identity.Sign(method, raw)
+		if err != nil {
+			return err
+		}
+		req.Auth = auth
+	}
+
+	if err := c.enc.Encode(req); err != nil {
 		return fmt.Errorf("failed to send %s: %w", method, err)
 	}
 

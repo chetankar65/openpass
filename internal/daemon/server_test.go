@@ -3,28 +3,30 @@ package daemon
 import (
 	"encoding/json"
 	"net"
+	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/chetankar/openpass/internal/client"
 )
 
-// testClient is a connection to a running daemon.
-type testClient struct {
-	t   *testing.T
-	enc *json.Encoder
-	dec *json.Decoder
-}
+const serverTestPassword = "correct-horse-battery-staple"
 
-// newTestServer starts a real daemon on a temporary socket and vault, and
-// returns a connected client.
-//
-// Serve() blocks forever by design, so it runs in a goroutine. Listen() has
-// already created the socket by the time this returns, so there is nothing to
-// poll for.
-func newTestServer(t *testing.T) *testClient {
+// startServer runs a daemon on a temporary socket and vault.
+func startServer(t *testing.T) (*Server, string) {
 	t.Helper()
 
 	dir := t.TempDir()
-	s, err := NewServer(filepath.Join(dir, "d.sock"), filepath.Join(dir, "vault.opv"), DefaultIdleTimeout)
+
+	// The socket lives in a short path of its own: sun_path is capped at 104
+	// bytes and t.TempDir embeds the test name.
+	sockDir, err := os.MkdirTemp("", "op")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(sockDir) })
+
+	s, err := NewServer(filepath.Join(sockDir, "d.sock"), filepath.Join(dir, "vault.opv"), DefaultIdleTimeout)
 	if err != nil {
 		t.Fatalf("NewServer failed: %v", err)
 	}
@@ -34,177 +36,176 @@ func newTestServer(t *testing.T) *testClient {
 	t.Cleanup(func() { s.Close() })
 
 	go s.Serve()
-
-	conn, err := net.Dial("unix", s.Addr())
-	if err != nil {
-		t.Fatalf("failed to connect: %v", err)
-	}
-	t.Cleanup(func() { conn.Close() })
-
-	return &testClient{t: t, enc: json.NewEncoder(conn), dec: json.NewDecoder(conn)}
+	return s, dir
 }
 
-// call sends a request and returns the response.
-func (c *testClient) call(id int, method string, params any) ResponseData {
-	c.t.Helper()
+// dialAs connects with a fresh identity and registers it.
+func dialAs(t *testing.T, s *Server, dir, name, kind string) (*client.Client, client.PairResult) {
+	t.Helper()
 
-	req := map[string]any{"jsonrpc": "2.0", "id": id, "method": method}
-	if params != nil {
-		req["params"] = params
-	}
-	if err := c.enc.Encode(req); err != nil {
-		c.t.Fatalf("failed to send %s: %v", method, err)
+	identity, err := client.LoadOrCreateIdentity(filepath.Join(dir, name+".key"), name, kind)
+	if err != nil {
+		t.Fatalf("LoadOrCreateIdentity failed: %v", err)
 	}
 
-	var resp ResponseData
-	if err := c.dec.Decode(&resp); err != nil {
-		c.t.Fatalf("failed to read the response to %s: %v", method, err)
+	c, err := client.Dial(s.Addr())
+	if err != nil {
+		t.Fatalf("Dial failed: %v", err)
 	}
-	if resp.Id != id {
-		c.t.Errorf("response id = %d, want %d", resp.Id, id)
+	t.Cleanup(func() { c.Close() })
+	c.SetIdentity(identity)
+
+	result, err := c.Pair()
+	if err != nil {
+		t.Fatalf("Pair failed: %v", err)
 	}
-	return resp
+	return c, result
 }
 
 func TestServerLifecycle(t *testing.T) {
-	c := newTestServer(t)
-	const password = "correct-horse-battery-staple"
+	s, dir := startServer(t)
+	c, pair := dialAs(t, s, dir, "cli", "cli")
 
-	// A fresh daemon has no vault and is locked.
-	resp := c.call(1, "status", nil)
-	if resp.Error != nil {
-		t.Fatalf("status failed: %+v", resp.Error)
+	if pair.State != StateApproved {
+		t.Fatalf("the first client is %s, want approved", pair.State)
 	}
-	status := resp.Result.(map[string]any)
-	if status["vault_present"] != false || status["locked"] != true {
+
+	status, err := c.Status()
+	if err != nil {
+		t.Fatalf("status failed: %v", err)
+	}
+	if status.VaultPresent || !status.Locked {
 		t.Errorf("fresh status = %+v, want absent and locked", status)
 	}
-	// A locked vault must not report its size, not even as zero.
-	if status["entry_count"] != nil {
-		t.Errorf("entry_count = %v while locked, want null", status["entry_count"])
+	if status.EntryCount != nil {
+		t.Error("entry_count is reported while locked")
 	}
 
-	// Reads must fail before unlock.
-	if resp := c.call(2, "vault.list", nil); resp.Error == nil {
-		t.Error("vault.list succeeded while locked")
-	} else if resp.Error.Code != codeVaultLocked {
-		t.Errorf("code = %d, want %d (VAULT_LOCKED)", resp.Error.Code, codeVaultLocked)
+	if _, err := c.List(); !client.IsCode(err, client.CodeVaultLocked) {
+		t.Errorf("list while locked err = %v, want VAULT_LOCKED", err)
 	}
 
-	// Create the vault.
-	if resp := c.call(3, "vault.init", map[string]any{"password": password}); resp.Error != nil {
-		t.Fatalf("vault.init failed: %+v", resp.Error)
+	if err := c.Init([]byte(serverTestPassword)); err != nil {
+		t.Fatalf("init failed: %v", err)
 	}
 
-	// Add an entry.
-	resp = c.call(4, "vault.add", map[string]any{
-		"name":     "GitHub",
-		"username": "chetan",
-		"password": "hunter2",
-		"urls":     []string{"https://github.com"},
+	id, err := c.Add(client.AddParams{
+		Name: "GitHub", Username: "chetan", Password: "hunter2",
+		URLs: []string{"https://github.com"},
 	})
-	if resp.Error != nil {
-		t.Fatalf("vault.add failed: %+v", resp.Error)
-	}
-	id := resp.Result.(map[string]any)["id"].(string)
-
-	// list must not carry the secret.
-	resp = c.call(5, "vault.list", nil)
-	if resp.Error != nil {
-		t.Fatalf("vault.list failed: %+v", resp.Error)
-	}
-	raw, _ := json.Marshal(resp.Result)
-	if contains(string(raw), "hunter2") {
-		t.Errorf("vault.list leaked the password: %s", raw)
+	if err != nil {
+		t.Fatalf("add failed: %v", err)
 	}
 
-	// get without reveal must not carry it either.
-	resp = c.call(6, "vault.get", map[string]any{"id": id})
-	raw, _ = json.Marshal(resp.Result)
-	if contains(string(raw), "hunter2") {
-		t.Errorf("vault.get without reveal leaked the password: %s", raw)
+	entries, err := c.List()
+	if err != nil {
+		t.Fatalf("list failed: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Password != "" {
+		t.Errorf("list returned %+v; it must never carry a password", entries)
 	}
 
-	// get with reveal must.
-	resp = c.call(7, "vault.get", map[string]any{"id": id, "reveal": true})
-	if resp.Error != nil {
-		t.Fatalf("vault.get failed: %+v", resp.Error)
-	}
-	entry := resp.Result.(map[string]any)["entry"].(map[string]any)
-	if entry["password"] != "hunter2" {
-		t.Errorf("revealed password = %v, want hunter2", entry["password"])
+	if entry, err := c.Get(id, false); err != nil || entry.Password != "" {
+		t.Errorf("get without reveal returned a password: %+v (%v)", entry, err)
 	}
 
-	// Lock, then confirm the entry is unreachable and the count is hidden.
-	if resp := c.call(8, "lock", nil); resp.Error != nil {
-		t.Fatalf("lock failed: %+v", resp.Error)
+	entry, err := c.Get(id, true)
+	if err != nil {
+		t.Fatalf("get with reveal failed: %v", err)
 	}
-	if resp := c.call(9, "vault.get", map[string]any{"id": id}); resp.Error == nil {
-		t.Error("vault.get succeeded after lock")
-	}
-
-	// Unlock with the wrong password.
-	resp = c.call(10, "unlock", map[string]any{"password": "wrong"})
-	if resp.Error == nil {
-		t.Fatal("unlock succeeded with the wrong password")
-	}
-	if resp.Error.Code != codeBadPassword {
-		t.Errorf("code = %d, want %d (BAD_PASSWORD)", resp.Error.Code, codeBadPassword)
+	if entry.Password != "hunter2" {
+		t.Errorf("revealed password = %q, want hunter2", entry.Password)
 	}
 
-	// Unlock properly; the entry must have survived the round trip to disk.
-	if resp := c.call(11, "unlock", map[string]any{"password": password}); resp.Error != nil {
-		t.Fatalf("unlock failed: %+v", resp.Error)
+	if err := c.Lock(); err != nil {
+		t.Fatalf("lock failed: %v", err)
 	}
-	resp = c.call(12, "vault.get", map[string]any{"id": id, "reveal": true})
-	if resp.Error != nil {
-		t.Fatalf("vault.get after unlock failed: %+v", resp.Error)
-	}
-	entry = resp.Result.(map[string]any)["entry"].(map[string]any)
-	if entry["password"] != "hunter2" {
-		t.Errorf("password after reload = %v, want hunter2", entry["password"])
+	if _, err := c.Get(id, false); !client.IsCode(err, client.CodeVaultLocked) {
+		t.Errorf("get after lock err = %v, want VAULT_LOCKED", err)
 	}
 
-	// Delete it.
-	if resp := c.call(13, "vault.delete", map[string]any{"id": id}); resp.Error != nil {
-		t.Fatalf("vault.delete failed: %+v", resp.Error)
+	if err := c.Unlock([]byte("wrong")); !client.IsCode(err, client.CodeBadPassword) {
+		t.Errorf("wrong password err = %v, want BAD_PASSWORD", err)
 	}
-	if resp := c.call(14, "vault.get", map[string]any{"id": id}); resp.Error == nil {
-		t.Error("vault.get succeeded after delete")
-	} else if resp.Error.Code != codeNotFound {
-		t.Errorf("code = %d, want %d (NOT_FOUND)", resp.Error.Code, codeNotFound)
+	if err := c.Unlock([]byte(serverTestPassword)); err != nil {
+		t.Fatalf("unlock failed: %v", err)
+	}
+
+	if entry, err := c.Get(id, true); err != nil || entry.Password != "hunter2" {
+		t.Errorf("password did not survive the reload: %+v (%v)", entry, err)
+	}
+
+	if err := c.Delete(id); err != nil {
+		t.Fatalf("delete failed: %v", err)
+	}
+	if _, err := c.Get(id, false); !client.IsCode(err, client.CodeNotFound) {
+		t.Errorf("get after delete err = %v, want NOT_FOUND", err)
 	}
 }
 
-// A bad request must produce an error response, not kill the daemon.
-func TestServerSurvivesBadRequests(t *testing.T) {
-	c := newTestServer(t)
+// Unsigned requests must be rejected, and must not take the daemon down.
+func TestServerRejectsUnsignedRequests(t *testing.T) {
+	s, dir := startServer(t)
 
-	if resp := c.call(1, "does.not.exist", nil); resp.Error == nil {
-		t.Error("unknown method succeeded")
-	} else if resp.Error.Code != codeMethodUnknown {
-		t.Errorf("code = %d, want %d", resp.Error.Code, codeMethodUnknown)
+	conn, err := net.Dial("unix", s.Addr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	enc := json.NewEncoder(conn)
+	dec := json.NewDecoder(conn)
+
+	send := func(method string, params any) ResponseData {
+		t.Helper()
+		req := map[string]any{"jsonrpc": "2.0", "id": 1, "method": method}
+		if params != nil {
+			req["params"] = params
+		}
+		if err := enc.Encode(req); err != nil {
+			t.Fatal(err)
+		}
+		var resp ResponseData
+		if err := dec.Decode(&resp); err != nil {
+			t.Fatal(err)
+		}
+		return resp
 	}
 
-	if resp := c.call(2, "vault.init", nil); resp.Error == nil {
-		t.Error("vault.init succeeded with no params")
-	}
-
-	if resp := c.call(3, "unlock", "not-an-object"); resp.Error == nil {
-		t.Error("unlock succeeded with malformed params")
-	}
-
-	// Still alive.
-	if resp := c.call(4, "status", nil); resp.Error != nil {
-		t.Fatalf("the daemon stopped serving after bad requests: %+v", resp.Error)
-	}
-}
-
-func contains(haystack, needle string) bool {
-	for i := 0; i+len(needle) <= len(haystack); i++ {
-		if haystack[i:i+len(needle)] == needle {
-			return true
+	for _, method := range []string{"status", "vault.list", "vault.init", "client.list"} {
+		resp := send(method, map[string]any{"password": "x"})
+		if resp.Error == nil {
+			t.Errorf("unsigned %s succeeded", method)
+			continue
+		}
+		if resp.Error.Code != codeNotPaired {
+			t.Errorf("unsigned %s code = %d, want %d", method, resp.Error.Code, codeNotPaired)
 		}
 	}
-	return false
+
+	// Still serving.
+	c, _ := dialAs(t, s, dir, "cli", "cli")
+	if _, err := c.Status(); err != nil {
+		t.Fatalf("the daemon stopped serving: %v", err)
+	}
+}
+
+func TestServerSurvivesBadRequests(t *testing.T) {
+	s, dir := startServer(t)
+	c, _ := dialAs(t, s, dir, "cli", "cli")
+
+	if err := c.Init([]byte(serverTestPassword)); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := c.Get("no-such-id", false); !client.IsCode(err, client.CodeNotFound) {
+		t.Errorf("err = %v, want NOT_FOUND", err)
+	}
+	if _, err := c.Add(client.AddParams{}); err == nil {
+		t.Error("add accepted an entry with no name")
+	}
+
+	if _, err := c.Status(); err != nil {
+		t.Fatalf("the daemon stopped serving after bad requests: %v", err)
+	}
 }

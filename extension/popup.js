@@ -184,18 +184,13 @@ function setupAddForm(tab, domain) {
   document.getElementById("addCapture").addEventListener("click", async () => {
     const found = await tabMessage(tab.id, { action: "capture" });
     if (!found) {
-      addError.textContent = "Could not read the page. Reload it and try again.";
+      addError.textContent = "Nothing filled in on the page yet.";
       addError.hidden = false;
       return;
     }
     if (found.username) user.value = found.username;
     if (found.password) pass.value = found.password;
-    if (!found.username && !found.password) {
-      addError.textContent = "Nothing filled in on the page yet.";
-      addError.hidden = false;
-    } else {
-      addError.hidden = true;
-    }
+    addError.hidden = true;
   });
 
   addForm.addEventListener("submit", async (event) => {

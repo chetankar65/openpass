@@ -121,6 +121,10 @@ func NewRegistry(path string) (*Registry, error) {
 		return nil, fmt.Errorf("failed to parse %s: %w", path, err)
 	}
 	for _, c := range stored.Clients {
+		// The method allowlist belongs to the client's kind, not the moment it
+		// paired. Recompute it so a client paired under an older allowlist
+		// picks up changes instead of being stuck with a stale snapshot.
+		c.Policy.Methods = defaultPolicy(c.Kind).Methods
 		r.clients[c.ID] = c
 	}
 	return r, nil

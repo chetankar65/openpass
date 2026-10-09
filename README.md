@@ -2,15 +2,59 @@
 
 <img src="icons/logo.png" alt="openpass" width="420">
 
-# openpass
-
 **A completely local password manager. No sync, no accounts, no network.**
 
 </div>
 
 ---
 
-A daemon (`openpassd`) owns an encrypted vault file and exposes a JSON-RPC API over a Unix socket. The CLI (`openpass`) and the browser extension are both clients of that API — neither has a privileged path to the vault.
+## Fills passwords on sites that fight you
+
+Plenty of login pages block paste. Banks, payroll portals, anything with a
+security consultant. You end up reading a 24-character password off another
+screen and typing it one character at a time.
+
+openpass fills it in one click.
+
+**And it never guesses which field is which.** You click the field. That removes
+the failure mode every other manager has: no password typed into a visible
+search box, and no sites it quietly cannot handle — shadow DOM, custom
+components, multi-step logins, single-page apps that render the form late. If
+you can click it, openpass can fill it.
+
+```
+1. click the field you want filled
+2. click the openpass icon
+3. click  Username  or  Password
+```
+
+It also saves new sites: the popup captures what you just typed into a login
+form, or generates a password for you.
+
+## Setup
+
+```bash
+git clone https://github.com/chetankar65/openpass
+cd openpass
+./setup.sh
+```
+
+It builds everything, creates your vault, and walks you through loading the
+extension. Full detail in [extension/README.md](extension/README.md).
+
+Two things to know afterwards:
+
+- **`openpass watch`** must be running for the extension to read a password. It
+  is what asks you first — the daemon never hands one over silently.
+- Your **master password cannot be recovered**. There is no reset, by design.
+
+---
+
+## And it is a real password manager underneath
+
+A daemon (`openpassd`) owns an encrypted vault file and exposes a JSON-RPC API
+over a Unix socket. The CLI (`openpass`) and the browser extension are both
+clients of that API — neither has a privileged path to the vault.
 
 ```
 openpass get github     ─┐
@@ -18,16 +62,24 @@ openpass get github     ─┐
 browser extension ──▶ bridge ─┘   (holds the key in memory while unlocked)
 ```
 
-- **Argon2id** derives a key-encryption key from your master password; that unwraps a random data key which encrypts the vault with **XChaCha20-Poly1305**.
-- The whole vault is one authenticated ciphertext, so the file leaks no entry names, usernames, or URLs.
-- Unlock once. Every read and write after that is instant — only `unlock` pays the Argon2id cost.
+- **Argon2id** derives a key-encryption key from your master password; that
+  unwraps a random data key which encrypts the vault with
+  **XChaCha20-Poly1305**.
+- The whole vault is one authenticated ciphertext, so the file leaks no entry
+  names, usernames, or URLs.
+- Unlock once. Every read and write after that is instant — only `unlock` pays
+  the Argon2id cost.
 - The vault auto-locks after 15 minutes idle, zeroing the key.
+
+Nothing touches the network. There is no account, no sync, and no server.
 
 ## Status
 
-The vault, daemon, CLI, pairing, approvals and browser extension are implemented and tested.
+The vault, daemon, CLI, pairing, approvals and browser extension are implemented
+and tested.
 
-Not built: changing your master password, TOTP, Firefox support, and a GUI for approvals. See [Limitations](#limitations).
+Not built: changing your master password, TOTP, Firefox support, and a GUI for
+approvals. See [Limitations](#limitations).
 
 ## Docs
 
@@ -37,9 +89,9 @@ Not built: changing your master password, TOTP, Firefox support, and a GUI for a
 
 ---
 
-## Install
+## Command line
 
-Go 1.27+, macOS or Linux. Unix sockets and POSIX permissions throughout; Windows is a real port, not a tweak.
+Go 1.27+, macOS or Linux. `setup.sh` builds these; to do it by hand:
 
 ```bash
 go build -o bin/openpass        ./cmd/openpass
@@ -47,15 +99,9 @@ go build -o bin/openpassd       ./cmd/openpassd
 go build -o bin/openpass-bridge ./cmd/openpass-bridge
 ```
 
-Keep them in one directory — `openpass` looks for `openpassd` next to itself before falling back to `PATH`, so a locally built set works without installing anything.
-
-```bash
-./bin/openpass init
-```
-
-You never start the daemon by hand: `openpass` spawns it on first use.
-
-## Using it
+Keep them in one directory — `openpass` looks for `openpassd` next to itself
+before falling back to `PATH`. You never start the daemon by hand; `openpass`
+spawns it on first use.
 
 ```bash
 openpass init                                        # create the vault
@@ -140,22 +186,6 @@ You rarely need `unlock` — any command needing the vault prompts and then carr
 | 2 | vault locked, and no terminal to prompt on |
 | 3 | not found |
 | 4 | ambiguous name |
-
----
-
-## Browser extension
-
-Click the field you want filled, click the openpass icon, click **Username** or **Password**. There is no field detection — your click removes the guess, and with it every case that defeats heuristics: shadow DOM, custom elements, multi-step logins, SPAs that render late.
-
-It can also save a new site: the popup offers to capture what you just typed into a login form, or to generate a password.
-
-Setup is in [extension/README.md](extension/README.md). The short version:
-
-```bash
-./extension/install-host.sh <extension-id> ./bin/openpass-bridge
-openpass client approve XXXX-XXXX    # code the extension shows
-openpass watch                       # leave running; approves reveals
-```
 
 ---
 

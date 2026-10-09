@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -188,6 +189,30 @@ func TestRegistryPersists(t *testing.T) {
 	}
 	if !found {
 		t.Error("the approved client did not survive a reload")
+	}
+}
+
+// A client paired under an older allowlist must pick up the current one on
+// reload, not keep the snapshot taken when it paired.
+func TestReloadRefreshesMethodAllowlist(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "clients.json")
+	stale := `{"clients":[{"id":"browser-x","kind":"browser","state":"approved",
+		"policy":{"reveal":"prompt","methods":["status"]}}]}`
+	if err := os.WriteFile(path, []byte(stale), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := NewRegistry(path)
+	if err != nil {
+		t.Fatalf("NewRegistry failed: %v", err)
+	}
+
+	got := r.List()[0].Policy
+	if !got.Allows("vault.add") {
+		t.Errorf("reloaded browser methods = %v, want the current allowlist", got.Methods)
+	}
+	if got.Reveal != RevealPrompt {
+		t.Errorf("reveal = %s, want the stored value kept", got.Reveal)
 	}
 }
 

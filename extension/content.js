@@ -131,18 +131,31 @@ function describeFocused() {
   };
 }
 
+// Every frame on the page runs a copy of this script, and a message sent to
+// the tab reaches all of them. A frame with nothing to say stays silent so the
+// first reply comes from the frame the user is actually working in, rather than
+// from whichever one happened to answer first.
 chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
+  const focused = describeFocused();
+
+  if (msg.action === "focused") {
+    if (!focused) return false;
+    respond(focused);
+    return true;
+  }
+
   if (msg.action === "fill") {
+    if (!focused) return false;
     respond(fill(msg.value, msg.mode));
     return true;
   }
-  if (msg.action === "focused") {
-    respond(describeFocused());
-    return true;
-  }
+
   if (msg.action === "capture") {
-    respond(capture());
+    const found = capture();
+    if (!found.username && !found.password) return false;
+    respond(found);
     return true;
   }
+
   return false;
 });

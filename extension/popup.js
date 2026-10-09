@@ -1,4 +1,7 @@
 const statusEl = document.getElementById("status");
+const addBar = document.getElementById("addBar");
+const addForm = document.getElementById("addForm");
+const addError = document.getElementById("addError");
 const entriesEl = document.getElementById("entries");
 const domainEl = document.getElementById("domain");
 const hintEl = document.getElementById("hint");
@@ -123,6 +126,105 @@ function renderEntries(tabId, entries, focused) {
   }
 }
 
+const PASSWORD_ALPHABET =
+  "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%^&*-_=+";
+
+// Unbiased selection: rejecting the tail of the byte range keeps every
+// character equally likely, which taking a byte mod 68 would not.
+function generatePassword(length = 24) {
+  const limit = 256 - (256 % PASSWORD_ALPHABET.length);
+  const out = [];
+
+  while (out.length < length) {
+    const bytes = crypto.getRandomValues(new Uint8Array(length));
+    for (const b of bytes) {
+      if (b < limit) out.push(PASSWORD_ALPHABET[b % PASSWORD_ALPHABET.length]);
+      if (out.length === length) break;
+    }
+  }
+  return out.join("");
+}
+
+// "github.com" reads better as "Github" in a list.
+function titleFromDomain(domain) {
+  const label = (domain || "").split(".")[0];
+  return label ? label.charAt(0).toUpperCase() + label.slice(1) : "";
+}
+
+function setupAddForm(tab, domain) {
+  const name = document.getElementById("addName");
+  const user = document.getElementById("addUser");
+  const pass = document.getElementById("addPass");
+
+  name.value = titleFromDomain(domain);
+
+  addBar.hidden = false;
+
+  document.getElementById("addToggle").addEventListener("click", () => {
+    addBar.hidden = true;
+    addForm.hidden = false;
+    (user.value ? pass : user).focus();
+  });
+
+  document.getElementById("addCancel").addEventListener("click", () => {
+    addForm.hidden = true;
+    addBar.hidden = false;
+    pass.value = "";
+  });
+
+  document.getElementById("addGen").addEventListener("click", () => {
+    pass.value = generatePassword();
+    pass.type = "text";
+  });
+
+  document.getElementById("addShow").addEventListener("click", () => {
+    pass.type = pass.type === "password" ? "text" : "password";
+  });
+
+  document.getElementById("addCapture").addEventListener("click", async () => {
+    const found = await tabMessage(tab.id, { action: "capture" });
+    if (!found) {
+      addError.textContent = "Nothing filled in on the page yet.";
+      addError.hidden = false;
+      return;
+    }
+    if (found.username) user.value = found.username;
+    if (found.password) pass.value = found.password;
+    addError.hidden = true;
+  });
+
+  addForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    addError.hidden = true;
+
+    if (!pass.value) {
+      addError.textContent = "A password is required.";
+      addError.hidden = false;
+      return;
+    }
+
+    const save = document.getElementById("addSave");
+    save.disabled = true;
+    save.textContent = "Saving…";
+
+    try {
+      await rpc("vault.add", {
+        name: name.value || domain,
+        username: user.value,
+        password: pass.value,
+        urls: [new URL(tab.url).origin],
+      });
+      pass.value = "";
+      window.close();
+    } catch (err) {
+      addError.textContent = err.code === -32001 ? "Vault is locked. Run `openpass unlock`." : err.message;
+      addError.hidden = false;
+      save.disabled = false;
+      save.textContent = "Save";
+    }
+  });
+}
+
 async function main() {
   const tab = await currentTab();
   if (!tab || !tab.url || !tab.url.startsWith("https://")) {
@@ -161,6 +263,8 @@ async function main() {
   }
 
   domainEl.textContent = match.domain || "";
+
+  setupAddForm(tab, match.domain);
 
   if (!match.entries || match.entries.length === 0) {
     setStatus(`No saved logins for ${match.domain}.`);

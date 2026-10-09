@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-/// End to end testing of the KDF module with default and tuned Argon2 parameters
+// / End to end testing of the KDF module with default and tuned Argon2 parameters
 func TestKDF(t *testing.T) {
 	params := DefaultArgon2Params()
 

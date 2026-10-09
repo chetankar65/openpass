@@ -109,6 +109,10 @@ func (b *bridge) handle(req incoming) outgoing {
 	}
 	defer c.Close()
 
+	if err := c.Handshake(); err != nil {
+		return outgoing{ID: req.ID, Error: &rpcEr{Code: -32000, Message: client.OutdatedAdvice(err)}}
+	}
+
 	identity, err := client.LoadOrCreateIdentity(b.identityPath, "Browser extension", "browser")
 	if err != nil {
 		return outgoing{ID: req.ID, Error: &rpcEr{Code: -32000, Message: err.Error()}}
@@ -158,6 +162,12 @@ func (b *bridge) proxy(c *client.Client, req incoming) (any, *rpcEr) {
 		json.Unmarshal(req.Params, &p)
 		e, err := c.Get(p.ID, p.Reveal)
 		return e, toErr(err)
+
+	case "vault.add":
+		var p client.AddParams
+		json.Unmarshal(req.Params, &p)
+		id, err := c.Add(p)
+		return map[string]string{"id": id}, toErr(err)
 
 	default:
 		// The daemon enforces this too; refusing here keeps unknown methods

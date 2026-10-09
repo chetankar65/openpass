@@ -76,9 +76,27 @@ every time). Grants are dropped when the vault locks.
 
 ## Using it
 
+**Filling a login**
+
 1. Click the field you want filled
 2. Click the openpass toolbar icon
 3. Click **Username** or **Password**
+
+**Saving a new site**
+
+On a site with no saved login, the popup offers **Save this site…**:
+
+- **Name** is prefilled from the domain
+- **Use what's on the page** pulls the username and password you just typed into
+  the login form
+- **⟳** generates a new password instead
+- **Save** stores it against the page's origin, so it matches on every subdomain
+  afterwards
+
+The capture button guesses which field is which — unlike filling, which never
+does. Guessing is safe here because the result lands in a form you review before
+saving, so a wrong guess costs you an edit. A wrong guess while filling would
+leak a password.
 
 The popup lists only entries registered to the page's registrable domain. The
 daemon decides that, not the extension — `paypal.com.evil.com` resolves to
@@ -91,8 +109,18 @@ Enforced by the daemon, not by this code:
 | | |
 |---|---|
 | `status`, `vault.match`, `vault.list`, `vault.get` | allowed |
-| add, update, delete, unlock, lock, manage clients | **refused** |
+| `vault.add` | allowed, so new sites can be saved |
+| update, delete, unlock, lock, manage clients | **refused** |
 | read a password | **only after you approve it** |
+
+Adding is allowed because the risk is clutter, not disclosure: an entry a
+hostile extension created holds a password it already knew. Reading an existing
+secret still needs your approval, and nothing can modify or delete what is
+already there.
+
+One gap worth knowing: a save is not announced. It appears in the daemon log but
+`openpass watch` does not surface it, so an unwanted entry would be found by
+running `openpass ls`, not by being told.
 
 The popup shows which logins exist for a site using `vault.match`, which never
 returns secrets. A password is requested only when you click a specific field
@@ -113,7 +141,8 @@ button, and is dropped straight after filling.
 
 - **Chrome-family only.** Firefox uses a different native messaging manifest
   location and key (`allowed_extensions`).
-- **No save-on-submit.** Adding entries is `openpass add`.
+- **No automatic save-on-submit.** Saving is a deliberate click in the popup;
+  the extension never offers to save on its own.
 - **No TOTP.**
 - **`openpass watch` must be running** for any password to be revealed. A
   menubar app would be the better home for that; the terminal is the honest

@@ -33,6 +33,9 @@ import (
 { "jsonrpc": "2.0", "id": 1, "error": { "code": -32001, "message": "vault is locked" } }
 */
 
+// Version is the daemon build's human-readable version.
+const Version = "0.1.0"
+
 type RequestData struct {
 	Jsonrpc string          `json:"jsonrpc"`
 	Id      int             `json:"id"`

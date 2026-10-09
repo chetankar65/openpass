@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -191,6 +192,30 @@ func TestRegistryPersists(t *testing.T) {
 	}
 }
 
+// A client paired under an older allowlist must pick up the current one on
+// reload, not keep the snapshot taken when it paired.
+func TestReloadRefreshesMethodAllowlist(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "clients.json")
+	stale := `{"clients":[{"id":"browser-x","kind":"browser","state":"approved",
+		"policy":{"reveal":"prompt","methods":["status"]}}]}`
+	if err := os.WriteFile(path, []byte(stale), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := NewRegistry(path)
+	if err != nil {
+		t.Fatalf("NewRegistry failed: %v", err)
+	}
+
+	got := r.List()[0].Policy
+	if !got.Allows("vault.add") {
+		t.Errorf("reloaded browser methods = %v, want the current allowlist", got.Methods)
+	}
+	if got.Reveal != RevealPrompt {
+		t.Errorf("reveal = %s, want the stored value kept", got.Reveal)
+	}
+}
+
 // Pairing again before approval must not create a second pending record: the
 // CLI registers on every invocation, so this happens constantly.
 func TestPairIsIdempotentWhilePending(t *testing.T) {
@@ -244,11 +269,16 @@ func TestBrowserPolicyRestrictsMethods(t *testing.T) {
 		}
 	}
 
+	if err := ext.Update(id, client.AddParams{Name: "renamed"}); !client.IsCode(err, -32006) {
+		t.Errorf("update err = %v, want DENIED_BY_POLICY", err)
+	}
 	if err := ext.Delete(id); !client.IsCode(err, -32006) {
 		t.Errorf("delete err = %v, want DENIED_BY_POLICY", err)
 	}
-	if _, err := ext.Add(client.AddParams{Name: "x", Password: "y"}); !client.IsCode(err, -32006) {
-		t.Errorf("add err = %v, want DENIED_BY_POLICY", err)
+	// Saving a new site from the browser is allowed; the risk is clutter, not
+	// disclosure.
+	if _, err := ext.Add(client.AddParams{Name: "x", Password: "y"}); err != nil {
+		t.Errorf("a browser client could not add an entry: %v", err)
 	}
 	if err := ext.RevokeClient("cli-anything"); !client.IsCode(err, -32006) {
 		t.Errorf("revoke err = %v, want DENIED_BY_POLICY", err)

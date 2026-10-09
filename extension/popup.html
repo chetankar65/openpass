@@ -105,6 +105,58 @@
       .error {
         color: #c0392b;
       }
+      form {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid var(--line);
+      }
+      label {
+        display: block;
+        margin-bottom: 8px;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      input[type="text"],
+      input[type="password"] {
+        display: block;
+        width: 100%;
+        box-sizing: border-box;
+        margin-top: 3px;
+        padding: 6px;
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        background: transparent;
+        color: var(--fg);
+        font: inherit;
+      }
+      input:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .row {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        margin-top: 6px;
+      }
+      .row input {
+        flex: 1;
+      }
+      .row button {
+        flex: 0 0 auto;
+        padding: 6px 10px;
+      }
+      button.wide {
+        width: 100%;
+        margin-top: 10px;
+      }
+      button.primary {
+        flex: 1;
+        border-color: var(--accent);
+        color: var(--accent);
+        font-weight: 600;
+      }
+
       code {
         font-size: 11px;
         background: color-mix(in srgb, var(--fg) 8%, transparent);
@@ -122,6 +174,30 @@
     <div id="hint" hidden></div>
     <div id="status">Loading…</div>
     <div id="entries"></div>
+
+    <div id="addBar" hidden>
+      <button id="addToggle" class="wide">Save this site…</button>
+    </div>
+
+    <form id="addForm" hidden>
+      <label>Name<input id="addName" type="text" autocomplete="off" /></label>
+      <label>Username<input id="addUser" type="text" autocomplete="off" /></label>
+      <label>Password
+        <span class="row">
+          <input id="addPass" type="password" autocomplete="new-password" />
+          <button type="button" id="addGen" title="Generate">⟳</button>
+          <button type="button" id="addShow" title="Show">👁</button>
+        </span>
+      </label>
+      <div class="row">
+        <button type="button" id="addCapture">Use what's on the page</button>
+      </div>
+      <div class="row">
+        <button type="submit" id="addSave" class="primary">Save</button>
+        <button type="button" id="addCancel">Cancel</button>
+      </div>
+      <div id="addError" class="error" hidden></div>
+    </form>
 
     <script src="popup.js"></script>
   </body>

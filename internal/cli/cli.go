@@ -199,6 +199,16 @@ func (a *app) connect() (*client.Client, error) {
 		return nil, err
 	}
 
+	// The daemon outlives upgrades, so a new binary routinely meets an old
+	// daemon. Check before anything depends on a method it may not have.
+	if err := c.Handshake(); err != nil {
+		c.Close()
+		if errors.Is(err, client.ErrDaemonOutdated) || errors.Is(err, client.ErrClientOutdated) {
+			return nil, errors.New(client.OutdatedAdvice(err))
+		}
+		return nil, err
+	}
+
 	identity, err := client.LoadOrCreateIdentity(a.identityPath, "openpass CLI", "cli")
 	if err != nil {
 		c.Close()

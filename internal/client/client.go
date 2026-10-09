@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -53,18 +54,44 @@ type request struct {
 
 type response struct {
 	Jsonrpc string          `json:"jsonrpc"`
-	Id      int             `json:"id"`
+	Id      *int            `json:"id"`
+	Method  string          `json:"method,omitempty"`
+	Params  json.RawMessage `json:"params,omitempty"`
 	Result  json.RawMessage `json:"result,omitempty"`
 	Error   *Error          `json:"error,omitempty"`
 }
 
+// Notification is a message the daemon sends unprompted. In JSON-RPC these
+// carry no id, which is how they are told apart from replies.
+type Notification struct {
+	Method string
+	Params json.RawMessage
+}
+
 // Client is a connection to the daemon.
 type Client struct {
+	mu       sync.Mutex
 	conn     net.Conn
 	enc      *json.Encoder
 	dec      *json.Decoder
 	nextID   int
 	identity *Identity
+
+	// notifications is non-nil once Notifications has been called. Until then
+	// an unprompted message is a protocol error, not something to buffer.
+	notifications chan Notification
+}
+
+// Notifications returns the channel of unprompted daemon messages. Call it
+// before any request that could cause one.
+func (c *Client) Notifications() <-chan Notification {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.notifications == nil {
+		c.notifications = make(chan Notification, 8)
+	}
+	return c.notifications
 }
 
 // SetIdentity makes the client sign its requests.
@@ -147,6 +174,56 @@ func FindDaemonBinary() string {
 
 func (c *Client) Close() error { return c.conn.Close() }
 
+// readResponse reads until the reply to id arrives, routing any notifications
+// that turn up in between.
+func (c *Client) readResponse(id int) (*response, error) {
+	for {
+		var resp response
+		if err := c.dec.Decode(&resp); err != nil {
+			return nil, err
+		}
+
+		if resp.Id == nil {
+			c.deliver(Notification{Method: resp.Method, Params: resp.Params})
+			continue
+		}
+		if *resp.Id != id {
+			return nil, fmt.Errorf("response id %d does not match request id %d", *resp.Id, id)
+		}
+		return &resp, nil
+	}
+}
+
+// ReadNotification blocks until the daemon sends one. Only for connections
+// doing nothing else, such as a subscriber.
+func (c *Client) ReadNotification() (Notification, error) {
+	for {
+		var resp response
+		if err := c.dec.Decode(&resp); err != nil {
+			return Notification{}, err
+		}
+		if resp.Id == nil {
+			return Notification{Method: resp.Method, Params: resp.Params}, nil
+		}
+	}
+}
+
+// deliver hands a notification to the subscriber, dropping it if nobody is
+// listening or the buffer is full. A slow subscriber must not stall requests.
+func (c *Client) deliver(n Notification) {
+	c.mu.Lock()
+	ch := c.notifications
+	c.mu.Unlock()
+
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- n:
+	default:
+	}
+}
+
 // call sends one request and decodes the reply into out.
 func (c *Client) call(method string, params, out any) error {
 	c.nextID++
@@ -177,12 +254,9 @@ func (c *Client) call(method string, params, out any) error {
 		return fmt.Errorf("failed to send %s: %w", method, err)
 	}
 
-	var resp response
-	if err := c.dec.Decode(&resp); err != nil {
+	resp, err := c.readResponse(id)
+	if err != nil {
 		return fmt.Errorf("failed to read the response to %s: %w", method, err)
-	}
-	if resp.Id != id {
-		return fmt.Errorf("response id %d does not match request id %d", resp.Id, id)
 	}
 	if resp.Error != nil {
 		return resp.Error

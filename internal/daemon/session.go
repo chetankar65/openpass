@@ -40,6 +40,16 @@ type Session struct {
 	idleTimeout time.Duration
 	lockTimer   *time.Timer
 	lockAt      time.Time
+
+	// onLock runs after the vault is locked, to drop anything scoped to the
+	// unlocked session.
+	onLock func()
+}
+
+func (s *Session) SetOnLock(fn func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onLock = fn
 }
 
 func NewSession(vaultPath string, idleTimeout time.Duration) (*Session, error) {
@@ -117,8 +127,13 @@ func (s *Session) Unlock(password []byte) error {
 // Lock zeroes the DEK and drops the decrypted entries. Idempotent.
 func (s *Session) Lock() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.clearLocked()
+	fn := s.onLock
+	s.mu.Unlock()
+
+	if fn != nil {
+		fn()
+	}
 }
 
 // clearLocked wipes the unlocked state. The caller must hold s.mu.

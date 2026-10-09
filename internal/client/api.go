@@ -74,6 +74,22 @@ func (c *Client) Get(id string, reveal bool) (Entry, error) {
 	return out.Entry, err
 }
 
+// MatchResult is what the daemon returns for a page URL.
+type MatchResult struct {
+	Domain  string  `json:"domain"`
+	Entries []Entry `json:"entries"`
+}
+
+// Match asks which entries belong to a page. Never returns secrets.
+func (c *Client) Match(pageURL string, allowInsecure bool) (MatchResult, error) {
+	var out MatchResult
+	err := c.call("vault.match", map[string]any{
+		"url":            pageURL,
+		"allow_insecure": allowInsecure,
+	}, &out)
+	return out, err
+}
+
 func (c *Client) Add(p AddParams) (string, error) {
 	var out struct {
 		ID string `json:"id"`
@@ -136,6 +152,8 @@ func resolveIn(entries []Entry, query string) (string, error) {
 	}
 
 	tiers := []func(Entry) bool{
+		// ls prints a truncated id, so that prefix has to resolve.
+		func(e Entry) bool { return len(query) >= 4 && strings.HasPrefix(e.ID, query) },
 		func(e Entry) bool { return equalFold(e.Name, query) },
 		func(e Entry) bool { return hasPrefixFold(e.Name, query) },
 		func(e Entry) bool {
@@ -226,4 +244,27 @@ func (c *Client) ApproveClient(code string) (ClientRecord, error) {
 
 func (c *Client) RevokeClient(id string) error {
 	return c.call("client.revoke", map[string]any{"id": id}, nil)
+}
+
+// ApprovalRequest is a question the daemon wants a human to answer.
+type ApprovalRequest struct {
+	ID       string `json:"id"`
+	ClientID string `json:"client_id"`
+	Client   string `json:"client"`
+	Entry    string `json:"entry"`
+	Domain   string `json:"domain,omitempty"`
+	Expires  int64  `json:"expires"`
+}
+
+// Subscribe asks the daemon to send approval questions on this connection.
+func (c *Client) Subscribe() error {
+	return c.call("events.subscribe", nil, nil)
+}
+
+// Respond answers a parked request. A positive ttl grants the same client and
+// domain a pass for that long.
+func (c *Client) Respond(id string, allow bool, ttlSeconds int) error {
+	return c.call("client.respond", map[string]any{
+		"id": id, "allow": allow, "ttl_seconds": ttlSeconds,
+	}, nil)
 }

@@ -56,4 +56,3 @@ func (v *Vault) AddEntry(entry Entry) error {
 func (v *Vault) GetEntries() []Entry {
 	return v.Body
 }
-

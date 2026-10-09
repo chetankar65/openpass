@@ -78,6 +78,11 @@ type passwordParams struct {
 	Password string `json:"password"`
 }
 
+type matchParams struct {
+	URL           string `json:"url"`
+	AllowInsecure bool   `json:"allow_insecure"`
+}
+
 type getParams struct {
 	ID     string `json:"id"`
 	Reveal bool   `json:"reveal"`
@@ -231,6 +236,41 @@ func (s *Session) handleList() (any, *rpcError) {
 	return map[string]any{"entries": views}, nil
 }
 
+// handleMatch answers "do I have a login for this page?" without revealing
+// anything. The daemon owns the matching so no client can invent its own.
+func (s *Session) handleMatch(raw json.RawMessage) (any, *rpcError) {
+	var p matchParams
+	if rerr := decodeParams(raw, &p); rerr != nil {
+		return nil, rerr
+	}
+
+	var domain string
+	var views []entryView
+
+	err := s.withVault(func(v *vault.Vault) (bool, error) {
+		d, matched, err := vault.MatchURL(v.Body, p.URL, vault.MatchOptions{AllowInsecure: p.AllowInsecure})
+		if err != nil {
+			return false, err
+		}
+		domain = d
+		for _, e := range matched {
+			views = append(views, viewOf(e, false))
+		}
+		return false, nil
+	})
+	if err != nil {
+		if errors.Is(err, vault.ErrUnmatchableURL) {
+			return nil, errf(codeInvalidParams, "%v", err)
+		}
+		return nil, toRPCError(err)
+	}
+
+	if views == nil {
+		views = []entryView{}
+	}
+	return map[string]any{"domain": domain, "entries": views}, nil
+}
+
 func (s *Session) handleGet(raw json.RawMessage) (any, *rpcError) {
 	var p getParams
 	if rerr := decodeParams(raw, &p); rerr != nil {
@@ -376,6 +416,8 @@ func (s *Session) Dispatch(req RequestData) (any, *rpcError) {
 		return s.handleLock()
 	case "vault.list":
 		return s.handleList()
+	case "vault.match":
+		return s.handleMatch(req.Params)
 	case "vault.get":
 		return s.handleGet(req.Params)
 	case "vault.add":

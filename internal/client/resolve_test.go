@@ -93,3 +93,19 @@ func TestIsCode(t *testing.T) {
 		t.Error("IsCode matched a non-daemon error")
 	}
 }
+
+// ls prints only the first 8 characters of an id, so that prefix must resolve.
+func TestResolveAcceptsIDPrefix(t *testing.T) {
+	got, err := resolveIn(testEntries, "aaaa")
+	if err != nil {
+		t.Fatalf("resolve by id prefix failed: %v", err)
+	}
+	if got != "aaaa1111" {
+		t.Errorf("got %s, want aaaa1111", got)
+	}
+
+	// Too short to be meaningful.
+	if _, err := resolveIn(testEntries, "a"); err == nil {
+		t.Error("a one-character id prefix resolved")
+	}
+}

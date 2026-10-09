@@ -53,8 +53,7 @@ func GetHeaderJSON(header Header) ([]byte, error) {
 // header JSON with every wraps[].ct blanked.
 
 // The ct fields are excluded because each wrap's ciphertext is produced *using*
-// this AAD, so including it would be circular. 
-//
+// this AAD, so including it would be circular.
 func (h Header) CanonicalAAD() ([]byte, error) {
 	blanked := h
 	blanked.Wraps = make([]Wrap, len(h.Wraps))

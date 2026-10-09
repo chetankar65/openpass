@@ -4,10 +4,16 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
+	"time"
+
+	"github.com/chetankar/openpass/internal/vault"
 )
 
-const codeNotPaired = -32005
-const codeDeniedByPolicy = -32006
+const (
+	codeNotPaired      = -32005
+	codeDeniedByPolicy = -32006
+	codeUserRejected   = -32007
+)
 
 // dispatch authenticates a request, then routes it.
 //
@@ -28,7 +34,15 @@ func (s *Server) dispatch(req RequestData) (any, *rpcError) {
 		return nil, errf(codeNotPaired, "authentication failed: %v", err)
 	}
 
+	if !record.Policy.Allows(req.Method) {
+		return nil, errf(codeDeniedByPolicy, "%s may not call %s", record.ID, req.Method)
+	}
+
 	switch req.Method {
+	case "events.subscribe":
+		return map[string]any{"subscribed": true}, nil
+	case "client.respond":
+		return s.handleRespond(req.Params)
 	case "client.list":
 		return map[string]any{"clients": s.registry.List()}, nil
 	case "client.approve":
@@ -39,12 +53,88 @@ func (s *Server) dispatch(req RequestData) (any, *rpcError) {
 
 	// Revealing a secret is the one call policy gates.
 	if req.Method == "vault.get" && wantsReveal(req.Params) {
-		if err := CanReveal(record); err != nil {
-			return nil, errf(codeDeniedByPolicy, "%v", err)
+		if rerr := s.authorizeReveal(record, req.Params); rerr != nil {
+			return nil, rerr
 		}
 	}
 
 	return s.session.Dispatch(req)
+}
+
+// authorizeReveal applies the client's reveal policy, asking a human when the
+// policy says to.
+func (s *Server) authorizeReveal(record *ClientRecord, params json.RawMessage) *rpcError {
+	switch record.Policy.Reveal {
+	case RevealAlways:
+		return nil
+	case RevealPrompt:
+		// fall through to the prompt
+	default:
+		return errf(codeDeniedByPolicy, "%s may not reveal secrets", record.ID)
+	}
+
+	name, domain := s.describeTarget(params)
+
+	err := s.broker.Ask(ApprovalRequest{
+		ClientID: record.ID,
+		Client:   record.Name,
+		Entry:    name,
+		Domain:   domain,
+	})
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, ErrNoWatcher):
+		return errf(codeDeniedByPolicy,
+			"%s needs approval to reveal a secret, but nothing is listening; run `openpass watch`", record.ID)
+	case errors.Is(err, ErrUserRejected):
+		return errf(codeUserRejected, "the request was declined")
+	default:
+		return errf(codeUserRejected, "%v", err)
+	}
+}
+
+// describeTarget looks up what the request is actually for, so the human is
+// asked about a name rather than an opaque id.
+func (s *Server) describeTarget(params json.RawMessage) (name, domain string) {
+	var p struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return "", ""
+	}
+
+	_ = s.session.withVault(func(v *vault.Vault) (bool, error) {
+		for _, e := range v.Body {
+			if e.ID == p.ID {
+				name = e.Name
+				if len(e.URLs) > 0 {
+					if d, err := vault.RegistrableDomain(e.URLs[0]); err == nil {
+						domain = d
+					}
+				}
+				return false, nil
+			}
+		}
+		return false, nil
+	})
+	return name, domain
+}
+
+func (s *Server) handleRespond(raw json.RawMessage) (any, *rpcError) {
+	var p struct {
+		ID         string `json:"id"`
+		Allow      bool   `json:"allow"`
+		TTLSeconds int    `json:"ttl_seconds"`
+	}
+	if rerr := decodeParams(raw, &p); rerr != nil {
+		return nil, rerr
+	}
+
+	if err := s.broker.Respond(p.ID, p.Allow, time.Duration(p.TTLSeconds)*time.Second); err != nil {
+		return nil, errf(codeNotFound, "%v", err)
+	}
+	return map[string]any{"ok": true}, nil
 }
 
 func wantsReveal(params json.RawMessage) bool {

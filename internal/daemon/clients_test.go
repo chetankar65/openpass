@@ -214,3 +214,46 @@ func TestPairIsIdempotentWhilePending(t *testing.T) {
 		t.Errorf("%d pending records, want 1", pending)
 	}
 }
+
+// A browser client may read, but must not be able to delete or manage clients.
+func TestBrowserPolicyRestrictsMethods(t *testing.T) {
+	s, dir := startServer(t)
+
+	cli, _ := dialAs(t, s, dir, "cli", "cli")
+	if err := cli.Init([]byte(serverTestPassword)); err != nil {
+		t.Fatal(err)
+	}
+	id, err := cli.Add(client.AddParams{Name: "GitHub", Password: "hunter2", URLs: []string{"https://github.com"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ext, pair := dialAs(t, s, dir, "ext", "browser")
+	if _, err := cli.ApproveClient(pair.Code); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, allowed := range []func() error{
+		func() error { _, err := ext.Status(); return err },
+		func() error { _, err := ext.List(); return err },
+		func() error { _, err := ext.Get(id, false); return err },
+		func() error { _, err := ext.Match("https://github.com", false); return err },
+	} {
+		if err := allowed(); err != nil {
+			t.Errorf("a permitted call was refused: %v", err)
+		}
+	}
+
+	if err := ext.Delete(id); !client.IsCode(err, -32006) {
+		t.Errorf("delete err = %v, want DENIED_BY_POLICY", err)
+	}
+	if _, err := ext.Add(client.AddParams{Name: "x", Password: "y"}); !client.IsCode(err, -32006) {
+		t.Errorf("add err = %v, want DENIED_BY_POLICY", err)
+	}
+	if err := ext.RevokeClient("cli-anything"); !client.IsCode(err, -32006) {
+		t.Errorf("revoke err = %v, want DENIED_BY_POLICY", err)
+	}
+	if err := ext.Lock(); !client.IsCode(err, -32006) {
+		t.Errorf("lock err = %v, want DENIED_BY_POLICY", err)
+	}
+}

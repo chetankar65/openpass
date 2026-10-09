@@ -1,10 +1,10 @@
 package vault
 
 import (
+	"bytes"
+	"github.com/chetankar/openpass/internal/crypto"
 	"testing"
 	"time"
-	"github.com/chetankar/openpass/internal/crypto"
-	"bytes"
 )
 
 func TestVaultLifecycle(t *testing.T) {

@@ -10,13 +10,13 @@ func TestSetHeaderAndGetHeaderJSON(t *testing.T) {
 	// Create a sample header
 	sampleHeader := Header{
 		Version: 1,
-		Cipher: "xchacha20poly1305",
+		Cipher:  "xchacha20poly1305",
 		KDF: struct {
 			Alg  string `json:"alg"`
 			Salt []byte `json:"salt"`
 			MKiB uint32 `json:"m_kib"`
 			T    uint32 `json:"t"`
-			P    uint8 `json:"p"`
+			P    uint8  `json:"p"`
 		}{
 			Alg:  "argon2id",
 			Salt: []byte("random_salt"),
@@ -26,16 +26,16 @@ func TestSetHeaderAndGetHeaderJSON(t *testing.T) {
 		},
 		Wraps: []Wrap{
 			{
-				ID: "master",
-				Kind: "password",
-				Nonce: []byte("random_nonce"),
+				ID:         "master",
+				Kind:       "password",
+				Nonce:      []byte("random_nonce"),
 				Ciphertext: []byte("encrypted_master_key"),
 			},
 		},
 		BodyNonce: []byte("body_nonce"),
 		CreatedAt: time.Now().Format(time.RFC3339),
 		UpdatedAt: time.Now().Format(time.RFC3339),
-		Revision: 42,
+		Revision:  42,
 	}
 
 	// Convert the sample header to JSON

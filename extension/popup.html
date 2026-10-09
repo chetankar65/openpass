@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --fg: #1a1a1a;
+        --muted: #6b6b6b;
+        --line: #e0e0e0;
+        --accent: #1f6f4a;
+        --bg: #ffffff;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --fg: #e8e8e8;
+          --muted: #9a9a9a;
+          --line: #333;
+          --accent: #4fbe8a;
+          --bg: #1c1c1c;
+        }
+      }
+
+      body {
+        width: 320px;
+        margin: 0;
+        padding: 12px;
+        background: var(--bg);
+        color: var(--fg);
+        font: 13px/1.45 system-ui, -apple-system, sans-serif;
+      }
+
+      header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--line);
+      }
+      h1 {
+        font-size: 13px;
+        font-weight: 600;
+        margin: 0;
+      }
+      #domain {
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      #hint {
+        margin: 8px 0;
+        padding: 8px;
+        border-radius: 6px;
+        background: color-mix(in srgb, var(--accent) 12%, transparent);
+        font-size: 12px;
+      }
+      #hint.warn {
+        background: color-mix(in srgb, #c9a227 20%, transparent);
+      }
+
+      .entry {
+        padding: 8px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .entry:last-child {
+        border-bottom: none;
+      }
+      .name {
+        font-weight: 600;
+      }
+      .user {
+        color: var(--muted);
+        font-size: 12px;
+        margin-bottom: 6px;
+        word-break: break-all;
+      }
+
+      .fields {
+        display: flex;
+        gap: 6px;
+      }
+      button {
+        flex: 1;
+        padding: 6px 8px;
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        background: transparent;
+        color: var(--fg);
+        font: inherit;
+        cursor: pointer;
+      }
+      button:hover:not(:disabled) {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      button:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+
+      #status {
+        color: var(--muted);
+        padding: 10px 0;
+      }
+      .error {
+        color: #c0392b;
+      }
+      code {
+        font-size: 11px;
+        background: color-mix(in srgb, var(--fg) 8%, transparent);
+        padding: 1px 4px;
+        border-radius: 3px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>openpass</h1>
+      <span id="domain"></span>
+    </header>
+
+    <div id="hint" hidden></div>
+    <div id="status">Loading…</div>
+    <div id="entries"></div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

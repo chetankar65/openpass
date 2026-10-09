@@ -54,6 +54,8 @@ Commands:
   get <name|id>        read an entry's password
   rm <name|id>         delete an entry
   client               manage paired clients
+  match <url>          show which entries a page URL resolves to
+  watch                answer approval requests from other clients
 
 Global flags:
   -socket <path>       daemon socket (default ~/.openpass/run/openpassd.sock)
@@ -119,6 +121,10 @@ func Main(args []string) int {
 		runErr = a.cmdRemove(commandArgs)
 	case "client":
 		runErr = a.cmdClient(commandArgs)
+	case "watch":
+		runErr = a.cmdWatch(commandArgs)
+	case "match":
+		runErr = a.cmdMatch(commandArgs)
 	case "help", "-h", "--help":
 		fmt.Fprint(a.stdout, usage)
 		return ExitOK

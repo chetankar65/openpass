@@ -36,6 +36,33 @@ var (
 
 type Policy struct {
 	Reveal string `json:"reveal"`
+
+	// Methods a client may call. Empty means no restriction, which is what the
+	// CLI gets. A browser gets a read-only set: pairing gates who is talking,
+	// this gates what they can do.
+	Methods []string `json:"methods,omitempty"`
+}
+
+// Allows reports whether the policy permits a method.
+func (p Policy) Allows(method string) bool {
+	if len(p.Methods) == 0 {
+		return true
+	}
+	for _, m := range p.Methods {
+		if m == method {
+			return true
+		}
+	}
+	return false
+}
+
+// browserMethods is everything a browser extension needs and nothing more. It
+// can find and read logins; it cannot delete, rename, or manage other clients.
+var browserMethods = []string{
+	"status",
+	"vault.match",
+	"vault.list",
+	"vault.get",
 }
 
 type ClientRecord struct {
@@ -257,7 +284,7 @@ func defaultPolicy(kind string) Policy {
 	if kind == "cli" {
 		return Policy{Reveal: RevealAlways}
 	}
-	return Policy{Reveal: RevealPrompt}
+	return Policy{Reveal: RevealPrompt, Methods: browserMethods}
 }
 
 func (r *Registry) expirePendingLocked() {

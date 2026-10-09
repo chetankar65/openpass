@@ -168,7 +168,7 @@ func TestEncodedHeaderIsTamperEvident(t *testing.T) {
 	headerLen := int(binary.BigEndian.Uint32(raw[9:13]))
 	header := raw[preambleLen : preambleLen+headerLen]
 
-	// The wraps' ct values are deliberately outside the body's AAD: 
+	// The wraps' ct values are deliberately outside the body's AAD:
 	ctStart, ctEnd := ctValueRange(t, header)
 
 	for i := preambleLen; i < preambleLen+headerLen; i++ {

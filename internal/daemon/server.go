@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -58,7 +59,9 @@ type Server struct {
 	socketPath string
 	session    *Session
 	registry   *Registry
+	broker     *Broker
 	listener   net.Listener
+	writeMu    sync.Mutex
 }
 
 func NewServer(socketPath, vaultPath string, idleTimeout time.Duration) (*Server, error) {
@@ -73,7 +76,17 @@ func NewServer(socketPath, vaultPath string, idleTimeout time.Duration) (*Server
 		return nil, err
 	}
 
-	return &Server{socketPath: socketPath, session: session, registry: registry}, nil
+	broker := NewBroker()
+
+	// Standing approvals belong to the unlocked session, not to the client.
+	session.SetOnLock(broker.RevokeGrants)
+
+	return &Server{
+		socketPath: socketPath,
+		session:    session,
+		registry:   registry,
+		broker:     broker,
+	}, nil
 }
 
 func (s *Server) Registry() *Registry { return s.registry }
@@ -145,6 +158,39 @@ func (s *Server) Close() error {
 	return s.session.Close()
 }
 
+// encode serializes one message. Writes are serialized because a notification
+// goroutine and a response can otherwise interleave mid-object.
+func (s *Server) encode(enc *json.Encoder, v any) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	return enc.Encode(v)
+}
+
+// streamEvents pushes approval questions to this connection in the background.
+// The returned function unsubscribes.
+func (s *Server) streamEvents(enc *json.Encoder) func() {
+	events, unsubscribe := s.broker.Subscribe()
+
+	go func() {
+		for _, req := range s.broker.Pending() {
+			if err := s.encode(enc, notification("approval.requested", req)); err != nil {
+				return
+			}
+		}
+		for req := range events {
+			if err := s.encode(enc, notification("approval.requested", req)); err != nil {
+				return
+			}
+		}
+	}()
+
+	return unsubscribe
+}
+
+func notification(method string, params any) map[string]any {
+	return map[string]any{"jsonrpc": "2.0", "method": method, "params": params}
+}
+
 func (s *Server) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
@@ -158,6 +204,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 	decoder := json.NewDecoder(conn)
 	encoder := json.NewEncoder(conn)
+	subscribed := false
 
 	for {
 		var request RequestData
@@ -180,9 +227,17 @@ func (s *Server) handleConnection(conn net.Conn) {
 			response.Result = result
 		}
 
-		if err := encoder.Encode(response); err != nil {
+		if err := s.encode(encoder, response); err != nil {
 			log.Printf("failed to encode response: %v", err)
 			return
+		}
+
+		// Start streaming alongside the read loop, so the same connection can
+		// both receive questions and send the answers.
+		if request.Method == "events.subscribe" && rerr == nil && !subscribed {
+			subscribed = true
+			stop := s.streamEvents(encoder)
+			defer stop()
 		}
 	}
 }

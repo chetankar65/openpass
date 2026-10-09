@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "openpass",
+  "version": "0.1.0",
+  "description": "Fill logins from your local openpass vault. Nothing leaves your machine.",
+
+  "permissions": ["nativeMessaging", "activeTab", "scripting"],
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "openpass"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
+}

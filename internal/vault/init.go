@@ -17,7 +17,6 @@ const (
 
 // Init creates a new vault at path and returns it along with its DEK.
 //
-//
 // Passing nil params uses DefaultArgon2Params.
 //
 // The caller owns the returned DEK and must ClearSecret it when the vault is

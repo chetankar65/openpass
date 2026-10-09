@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/chetankar/openpass/internal/client"
 	"github.com/chetankar/openpass/internal/vault"
 )
 
@@ -22,7 +23,12 @@ const (
 // requests were accepted at all, every policy below would be bypassable by
 // simply omitting the signature.
 func (s *Server) dispatch(req RequestData) (any, *rpcError) {
-	if req.Method == "client.pair" {
+	// hello and client.pair are the only unauthenticated methods. hello has to
+	// be, or a client could never find out it is talking to the wrong version.
+	switch req.Method {
+	case "hello":
+		return client.Hello{Protocol: client.ProtocolVersion, Version: Version}, nil
+	case "client.pair":
 		return s.handlePair(req.Params)
 	}
 

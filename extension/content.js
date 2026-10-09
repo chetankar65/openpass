@@ -80,6 +80,45 @@ function fill(value, mode) {
   return { ok: true };
 }
 
+// Reads whatever is currently typed into the page's login fields.
+//
+// This guesses which field is which, unlike filling, which never does. Guessing
+// is safe here: the result lands in a form you review before saving, so a wrong
+// guess costs an edit. A wrong guess while filling would leak a password.
+function capture() {
+  const visible = (el) => {
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && getComputedStyle(el).visibility !== "hidden";
+  };
+
+  const passwords = [...document.querySelectorAll("input[type=password]")].filter(visible);
+  const password = passwords.length ? passwords[0].value : "";
+
+  let username = "";
+
+  // Prefer the field the page itself labels as the username.
+  const declared = document.querySelector(
+    "input[autocomplete='username'], input[autocomplete='email']"
+  );
+  if (declared && visible(declared) && declared.value) {
+    username = declared.value;
+  }
+
+  // Otherwise the nearest filled text field above the password.
+  if (!username && passwords.length) {
+    const candidates = [...document.querySelectorAll("input")].filter(
+      (el) => ["text", "email", "tel", ""].includes((el.type || "").toLowerCase()) && visible(el) && el.value
+    );
+    const pwIndex = [...document.querySelectorAll("input")].indexOf(passwords[0]);
+    const before = candidates.filter(
+      (el) => [...document.querySelectorAll("input")].indexOf(el) < pwIndex
+    );
+    username = (before.length ? before[before.length - 1] : candidates[0])?.value || "";
+  }
+
+  return { username, password, title: document.title || "" };
+}
+
 function describeFocused() {
   const el = lastFocused;
   if (!isFillable(el) || !el.isConnected) return null;
@@ -99,6 +138,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
   }
   if (msg.action === "focused") {
     respond(describeFocused());
+    return true;
+  }
+  if (msg.action === "capture") {
+    respond(capture());
     return true;
   }
   return false;

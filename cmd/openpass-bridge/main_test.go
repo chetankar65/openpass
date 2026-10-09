@@ -70,7 +70,7 @@ func TestReadMessageRejectsTruncated(t *testing.T) {
 func TestProxyRefusesUnlistedMethods(t *testing.T) {
 	b := &bridge{}
 
-	for _, method := range []string{"vault.delete", "vault.add", "unlock", "lock", "client.revoke", "vault.init"} {
+	for _, method := range []string{"vault.delete", "vault.update", "unlock", "lock", "client.revoke", "vault.init", "events.subscribe"} {
 		_, rerr := b.proxy(nil, incoming{Method: method})
 		if rerr == nil {
 			t.Errorf("%s was proxied", method)
@@ -79,6 +79,30 @@ func TestProxyRefusesUnlistedMethods(t *testing.T) {
 		if !strings.Contains(rerr.Message, "not available over the bridge") {
 			t.Errorf("%s gave an unexpected error: %s", method, rerr.Message)
 		}
+	}
+}
+
+// The bridge surface is exactly what the extension needs. Anything added here
+// also has to be allowed by the daemon's per-client policy.
+func TestProxySurface(t *testing.T) {
+	want := map[string]bool{
+		"status":      true,
+		"vault.match": true,
+		"vault.get":   true,
+		"vault.add":   true,
+	}
+
+	b := &bridge{}
+	for method := range want {
+		// A nil client would panic if the method were proxied, so this only
+		// checks that the method is routed rather than refused outright.
+		func() {
+			defer func() { recover() }()
+			if _, rerr := b.proxy(nil, incoming{Method: method}); rerr != nil &&
+				strings.Contains(rerr.Message, "not available over the bridge") {
+				t.Errorf("%s is not routed by the bridge", method)
+			}
+		}()
 	}
 }
 

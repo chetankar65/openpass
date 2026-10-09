@@ -9,7 +9,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-
 type Secret struct {
 	// The secret is stored in memory as a byte slice
 	Data []byte

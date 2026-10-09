@@ -244,11 +244,16 @@ func TestBrowserPolicyRestrictsMethods(t *testing.T) {
 		}
 	}
 
+	if err := ext.Update(id, client.AddParams{Name: "renamed"}); !client.IsCode(err, -32006) {
+		t.Errorf("update err = %v, want DENIED_BY_POLICY", err)
+	}
 	if err := ext.Delete(id); !client.IsCode(err, -32006) {
 		t.Errorf("delete err = %v, want DENIED_BY_POLICY", err)
 	}
-	if _, err := ext.Add(client.AddParams{Name: "x", Password: "y"}); !client.IsCode(err, -32006) {
-		t.Errorf("add err = %v, want DENIED_BY_POLICY", err)
+	// Saving a new site from the browser is allowed; the risk is clutter, not
+	// disclosure.
+	if _, err := ext.Add(client.AddParams{Name: "x", Password: "y"}); err != nil {
+		t.Errorf("a browser client could not add an entry: %v", err)
 	}
 	if err := ext.RevokeClient("cli-anything"); !client.IsCode(err, -32006) {
 		t.Errorf("revoke err = %v, want DENIED_BY_POLICY", err)

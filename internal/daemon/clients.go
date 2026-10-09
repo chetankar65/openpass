@@ -56,13 +56,19 @@ func (p Policy) Allows(method string) bool {
 	return false
 }
 
-// browserMethods is everything a browser extension needs and nothing more. It
-// can find and read logins; it cannot delete, rename, or manage other clients.
+// browserMethods is everything a browser extension needs and nothing more.
+//
+// vault.add is included so a new site can be saved from the browser. Creating
+// entries risks clutter, not disclosure: an entry added by a hostile extension
+// holds a password that extension already knew. Reading an existing secret
+// still needs approval, and update, delete, unlock and client management stay
+// out of reach.
 var browserMethods = []string{
 	"status",
 	"vault.match",
 	"vault.list",
 	"vault.get",
+	"vault.add",
 }
 
 type ClientRecord struct {

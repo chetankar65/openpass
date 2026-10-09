@@ -209,3 +209,16 @@ func TestServerSurvivesBadRequests(t *testing.T) {
 		t.Fatalf("the daemon stopped serving after bad requests: %v", err)
 	}
 }
+
+// shortSocketPath returns a socket path under the 104-byte sun_path limit;
+// t.TempDir embeds the test name and routinely exceeds it.
+func shortSocketPath(t *testing.T) string {
+	t.Helper()
+
+	dir, err := os.MkdirTemp("", "op")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return filepath.Join(dir, "d.sock")
+}

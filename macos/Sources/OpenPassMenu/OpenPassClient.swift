@@ -167,6 +167,25 @@ struct OpenPassClient {
         return password
     }
 
+    func add(name: String, username: String, password: String, urls: [String], notes: String) async throws -> String {
+        var params: [String: Any] = ["name": name, "password": password]
+        if !username.isEmpty { params["username"] = username }
+        if !urls.isEmpty { params["urls"] = urls }
+        if !notes.isEmpty { params["notes"] = notes }
+
+        let r = try await conn.call("vault.add", params) as? [String: Any]
+        guard let id = r?["id"] as? String else {
+            throw OpenPassError.message("the daemon did not return the new entry's id")
+        }
+        return id
+    }
+
+    /// Replaces only the password. vault.update leaves every field it is not
+    /// sent as it was.
+    func changePassword(id: String, to password: String) async throws {
+        _ = try await conn.call("vault.update", ["id": id, "entry": ["password": password]])
+    }
+
     func subscribe() async throws {
         _ = try await conn.call("events.subscribe")
     }

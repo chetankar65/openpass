@@ -11,6 +11,13 @@ enum Phase: Equatable {
     case unlocked
 }
 
+/// What the unlocked popover is showing.
+enum Screen: Equatable {
+    case search
+    case add
+    case changePassword(Entry)
+}
+
 /// Everything the menu shows, and the two daemon connections behind it: one
 /// for requests, one subscribed to approval questions.
 @MainActor
@@ -22,6 +29,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var notice: String?
     @Published var query = ""
     @Published var selectedID: Entry.ID?
+    @Published var screen: Screen = .search
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     private let paths = Paths.default
@@ -169,7 +177,12 @@ final class AppModel: ObservableObject {
             let s = try await client.status()
             status = s
             let next: Phase = !s.vaultPresent ? .noVault : (s.locked ? .locked : .unlocked)
-            if next != .unlocked { entries = [] }
+            if next != .unlocked {
+                entries = []
+                // A half-filled form must not survive a lock and reappear,
+                // password and all, after the next unlock.
+                screen = .search
+            }
             if phase != next {
                 phase = next
                 if next == .unlocked { await refreshEntries() }
@@ -225,6 +238,65 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Adds an entry. Returns an error message for the form, or nil on success.
+    ///
+    /// A generated password is copied afterwards, as `openpass add -gen` does:
+    /// the next thing anyone does with it is paste it into the site.
+    func add(name: String, username: String, password: String, url: String, notes: String,
+             generated: Bool) async -> String? {
+        guard let client else { return "Not connected to openpassd." }
+        do {
+            let id = try await client.add(name: name, username: username, password: password,
+                                          urls: url.isEmpty ? [] : [url], notes: notes)
+            await refreshEntries()
+            query = ""
+            selectedID = id
+            screen = .search
+            if generated {
+                Clipboard.copySecret(password)
+                show("Added \(name) and copied its password. Clears in \(Int(Clipboard.clearAfter))s.")
+            } else {
+                show("Added \(name).")
+            }
+            return nil
+        } catch {
+            return formError(error)
+        }
+    }
+
+    func changePassword(_ entry: Entry, to password: String, generated: Bool) async -> String? {
+        guard let client else { return "Not connected to openpassd." }
+        do {
+            try await client.changePassword(id: entry.id, to: password)
+            selectedID = entry.id
+            screen = .search
+            if generated {
+                Clipboard.copySecret(password)
+                show("Changed the password for \(entry.name) and copied it. Clears in \(Int(Clipboard.clearAfter))s.")
+            } else {
+                show("Changed the password for \(entry.name).")
+            }
+            return nil
+        } catch {
+            return formError(error)
+        }
+    }
+
+    /// Whether an entry already has this name. Not an error, since the vault
+    /// allows it, but `openpass get <name>` will then call it ambiguous.
+    func nameTaken(_ name: String) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        return entries.contains { $0.name.caseInsensitiveCompare(trimmed) == .orderedSame }
+    }
+
+    private func formError(_ error: Error) -> String {
+        if let e = error as? OpenPassError, e.isCode(OpenPassError.vaultLocked) {
+            handle(error)
+            return "The vault locked."
+        }
+        return error.localizedDescription
+    }
+
     func copyUsername(_ entry: Entry) {
         Clipboard.copyPlain(entry.username)
         show("Copied the username for \(entry.name).")
@@ -248,6 +320,7 @@ final class AppModel: ObservableObject {
             if e.isCode(OpenPassError.vaultLocked) {
                 phase = .locked
                 entries = []
+                screen = .search
                 return
             }
             if case .disconnected = e { return } // onClose reconnects

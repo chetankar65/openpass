@@ -75,12 +75,16 @@ func setupWithWatcher(t *testing.T) (ext *client.Client, watcher *client.Client,
 	return ext, watcher, id
 }
 
-// answerOnce waits for one question and answers it.
-func answerOnce(t *testing.T, w *client.Client, allow bool, ttl int) chan client.ApprovalRequest {
+// answerOnce waits for one question and answers it. answered closes once the
+// reply to Respond has been read: a client is not safe for concurrent use, so
+// anything else reading from w has to wait for it.
+func answerOnce(t *testing.T, w *client.Client, allow bool, ttl int) (seen chan client.ApprovalRequest, answered chan struct{}) {
 	t.Helper()
 
-	seen := make(chan client.ApprovalRequest, 1)
+	seen = make(chan client.ApprovalRequest, 1)
+	answered = make(chan struct{})
 	go func() {
+		defer close(answered)
 		note, err := w.ReadNotification()
 		if err != nil {
 			return
@@ -92,12 +96,12 @@ func answerOnce(t *testing.T, w *client.Client, allow bool, ttl int) chan client
 		seen <- req
 		w.Respond(req.ID, allow, ttl)
 	}()
-	return seen
+	return seen, answered
 }
 
 func TestRevealAllowedWhenApproved(t *testing.T) {
 	ext, watcher, id := setupWithWatcher(t)
-	seen := answerOnce(t, watcher, true, 0)
+	seen, _ := answerOnce(t, watcher, true, 0)
 
 	entry, err := ext.Get(id, true)
 	if err != nil {
@@ -177,11 +181,16 @@ func TestGrantSkipsTheSecondPrompt(t *testing.T) {
 // Without a grant, the next reveal asks again.
 func TestNoGrantPromptsEveryTime(t *testing.T) {
 	ext, watcher, id := setupWithWatcher(t)
-	answerOnce(t, watcher, true, 0)
+	_, answered := answerOnce(t, watcher, true, 0)
 
 	if _, err := ext.Get(id, true); err != nil {
 		t.Fatalf("first get failed: %v", err)
 	}
+
+	// The daemon releases the get as soon as it has the answer, which can be
+	// before the watcher has read the reply to Respond. Reading notifications
+	// before then would race that read on the same connection.
+	<-answered
 
 	// A second question must arrive. Nobody answers it, so the reveal itself
 	// will eventually time out; what matters is that the human was asked.

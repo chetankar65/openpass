@@ -63,6 +63,12 @@ skip it. It also replaces `openpass watch`: approval requests from the browser
 appear as an Allow/Deny dialog. `openpass-bridge` needs no starting; Chrome
 launches it.
 
+**+** (or ⌘N) adds an entry, and the ↻ button on a row changes its password —
+everything else about the entry is kept. Both forms can generate a password
+the same way `openpass add -gen` does, and copy a generated one once saved.
+When rotating, copy the new password and set it on the site *before* saving:
+saving replaces the old one.
+
 It is a client like any other, with its own key at `~/.openpass/menubar.key`.
 On first launch it shows a pairing code to approve with
 `openpass client approve <code>`. "Launch at login" is in its settings menu.

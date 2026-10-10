@@ -50,7 +50,14 @@ struct MenuView: View {
         case .locked:
             UnlockView()
         case .unlocked:
-            SearchView()
+            switch model.screen {
+            case .search:
+                SearchView()
+            case .add:
+                AddEntryView()
+            case .changePassword(let entry):
+                ChangePasswordView(entry: entry)
+            }
         }
     }
 }
@@ -126,12 +133,18 @@ private struct SearchView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            TextField("Search", text: $model.query)
-                .textFieldStyle(.roundedBorder)
-                .focused($focused)
-                .onSubmit(copySelected)
-                .onKeyPress(.downArrow) { move(1); return .handled }
-                .onKeyPress(.upArrow) { move(-1); return .handled }
+            HStack(spacing: 6) {
+                TextField("Search", text: $model.query)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($focused)
+                    .onSubmit(copySelected)
+                    .onKeyPress(.downArrow) { move(1); return .handled }
+                    .onKeyPress(.upArrow) { move(-1); return .handled }
+                Button { model.screen = .add } label: { Image(systemName: "plus") }
+                    .buttonStyle(.borderless)
+                    .keyboardShortcut("n", modifiers: .command)
+                    .help("Add an entry (⌘N)")
+            }
 
             let results = model.filtered
             if results.isEmpty {
@@ -156,7 +169,7 @@ private struct SearchView: View {
                 }
             }
 
-            Text("↩ copies the password · ↑↓ to choose")
+            Text("↩ copies the password · ↑↓ to choose · ⌘N adds")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
@@ -201,6 +214,11 @@ private struct EntryRow: View {
             Button { Task { await model.copyPassword(entry) } } label: { Image(systemName: "key") }
                 .buttonStyle(.borderless)
                 .help("Copy password")
+            Button { model.screen = .changePassword(entry) } label: {
+                Image(systemName: "arrow.triangle.2.circlepath")
+            }
+            .buttonStyle(.borderless)
+            .help("Change password")
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)

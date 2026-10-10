@@ -44,9 +44,28 @@ extension. Full detail in [extension/README.md](extension/README.md).
 
 Two things to know afterwards:
 
-- **`openpass watch`** must be running for the extension to read a password. It
-  is what asks you first — the daemon never hands one over silently.
+- **`openpass watch`** (or the menu bar app below) must be running for the
+  extension to read a password. It is what asks you first — the daemon never
+  hands one over silently.
 - Your **master password cannot be recovered**. There is no reset, by design.
+
+### Menu bar app (macOS)
+
+```bash
+macos/build.sh --install      # needs Go and the Xcode Command Line Tools
+open ~/Applications/OpenPass.app
+```
+
+A lock in the menu bar that starts `openpassd` if it is not running, unlocks
+the vault, and searches it — Return copies the highlighted password, which is
+cleared from the clipboard after 30 seconds and marked so clipboard managers
+skip it. It also replaces `openpass watch`: approval requests from the browser
+appear as an Allow/Deny dialog. `openpass-bridge` needs no starting; Chrome
+launches it.
+
+It is a client like any other, with its own key at `~/.openpass/menubar.key`.
+On first launch it shows a pairing code to approve with
+`openpass client approve <code>`. "Launch at login" is in its settings menu.
 
 ---
 
@@ -242,11 +261,10 @@ Yes grants that client and site 5 minutes (`-remember 0` to be asked every time)
 ├── clients.json         paired clients and their policies (0600)
 ├── client.key           this machine's CLI identity (0600)
 ├── bridge.key           the browser bridge's identity (0600)
+├── menubar.key          the menu bar app's identity (0600)
 └── run/
     └── openpassd.sock   API socket (0600, in a 0700 directory)
 ```
-
-The header is readable plaintext — salt, KDF parameters, nonces. By design: you need it to derive the key, and it is a recipe, not a key. Everything else is ciphertext.
 
 ## Daemon
 

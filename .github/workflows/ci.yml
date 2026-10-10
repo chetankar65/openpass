@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch makes an in-progress run pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS only for now. Linux needs SO_PEERCRED in place of
+        # LOCAL_PEERCRED, and Windows needs the named-pipe transport; add
+        # their runners here as each port lands.
+        os: [macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: Build
+        run: |
+          go build -o bin/ ./cmd/openpass ./cmd/openpassd ./cmd/openpass-bridge
+
+      - name: Test
+        run: go test -race ./...
+
+  menubar:
+    name: Menu bar app (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # build.sh builds the Go binaries it bundles, so this covers the
+      # whole .app, not just the Swift package.
+      - name: Build OpenPass.app
+        run: macos/build.sh

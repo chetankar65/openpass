@@ -29,6 +29,22 @@ go build -o "$BIN/openpassd" ./cmd/openpassd
 go build -o "$BIN/openpass-bridge" ./cmd/openpass-bridge
 echo "built into $BIN"
 
+# On macOS the menu bar app replaces `openpass watch`, so it is part of a
+# normal install rather than an extra step.
+APP=""
+if [ "$(uname -s)" = Darwin ]; then
+  step "Building the menu bar app"
+  if command -v swift >/dev/null; then
+    # Quit a running copy so the new build is the one that starts.
+    osascript -e 'quit app "OpenPass"' >/dev/null 2>&1 || true
+    macos/build.sh --install
+    APP="$HOME/Applications/OpenPass.app"
+  else
+    warn "Skipped: needs the Xcode Command Line Tools (xcode-select --install)."
+    warn "Then run:  macos/build.sh --install"
+  fi
+fi
+
 # A daemon from a previous build keeps serving until it is stopped, and a new
 # CLI cannot talk to it.
 if pgrep -x openpassd >/dev/null 2>&1; then
@@ -46,6 +62,18 @@ else
   echo "Creating a vault. Your master password cannot be recovered."
   echo
   "$BIN/openpass" init
+fi
+
+if [ -n "$APP" ]; then
+  step "Starting the menu bar app"
+  open "$APP"
+  cat <<EOF
+Look for the lock in your menu bar. It shows a pairing code; approve it with:
+
+  $BIN/openpass client approve XXXX-XXXX
+
+"Launch at login" is in its settings menu.
+EOF
 fi
 
 if [ -z "$EXT_ID" ]; then
@@ -73,18 +101,22 @@ step "Registering the native messaging host"
 
 step "Almost done"
 cat <<EOF
-Two steps left, both in a terminal:
+Restart your browser, open the openpass extension, and run the approve
+command it shows you:
 
-  1. Restart your browser, open the openpass extension, and run the
-     approve command it shows you:
+  $BIN/openpass client approve XXXX-XXXX
 
-       $BIN/openpass client approve XXXX-XXXX
+EOF
+if [ -z "$APP" ]; then
+  cat <<EOF
+Then leave this running whenever you want the extension to fill passwords.
+It is what asks you before any password is handed over:
 
-  2. Leave this running whenever you want the extension to fill passwords.
-     It is what asks you before any password is handed over:
+  $BIN/openpass watch
 
-       $BIN/openpass watch
-
+EOF
+fi
+cat <<EOF
 Then: click a field on any login page, click the openpass icon, pick the entry.
 
 EOF

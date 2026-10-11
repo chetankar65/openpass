@@ -174,6 +174,9 @@ private struct SearchView: View {
                 .foregroundStyle(.tertiary)
         }
         .onAppear { focused = true }
+        // Covers both the popover closing and switching to a form: a revealed
+        // password must not be waiting there when you come back.
+        .onDisappear { model.hidePassword() }
         .onChange(of: model.query) { model.selectedID = nil }
     }
 
@@ -196,7 +199,30 @@ private struct EntryRow: View {
     let entry: Entry
     let selected: Bool
 
+    private var password: String? {
+        model.revealed?.id == entry.id ? model.revealed?.password : nil
+    }
+
     var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            header
+            if let password {
+                RevealedDetails(username: entry.username, password: password)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(selected ? Color.accentColor.opacity(0.18) : .clear)
+        )
+        .contentShape(Rectangle())
+        // Hovering selects, so the mouse and the arrow keys share one highlight.
+        .onHover { if $0 { model.selectedID = entry.id } }
+        .onTapGesture { Task { await model.copyPassword(entry) } }
+    }
+
+    private var header: some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(entry.name).lineLimit(1)
@@ -206,6 +232,11 @@ private struct EntryRow: View {
                     .lineLimit(1)
             }
             Spacer()
+            Button { Task { await model.toggleReveal(entry) } } label: {
+                Image(systemName: password == nil ? "eye" : "eye.slash")
+            }
+            .buttonStyle(.borderless)
+            .help(password == nil ? "Show username and password" : "Hide")
             if !entry.username.isEmpty {
                 Button { model.copyUsername(entry) } label: { Image(systemName: "person") }
                     .buttonStyle(.borderless)
@@ -220,21 +251,35 @@ private struct EntryRow: View {
             .buttonStyle(.borderless)
             .help("Change password")
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(selected ? Color.accentColor.opacity(0.18) : .clear)
-        )
-        .contentShape(Rectangle())
-        // Hovering selects, so the mouse and the arrow keys share one highlight.
-        .onHover { if $0 { model.selectedID = entry.id } }
-        .onTapGesture { Task { await model.copyPassword(entry) } }
     }
 
     private var subtitle: String {
         let host = entry.urls.first.flatMap { URL(string: $0)?.host } ?? entry.urls.first
         return [entry.username, host].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+}
+
+/// The username and password under a row after its eye is clicked.
+private struct RevealedDetails: View {
+    let username: String
+    let password: String
+
+    var body: some View {
+        Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 3) {
+            GridRow {
+                Text("Username").foregroundStyle(.secondary)
+                Text(username.isEmpty ? "—" : username)
+            }
+            GridRow {
+                Text("Password").foregroundStyle(.secondary)
+                Text(password)
+            }
+        }
+        .font(.system(.caption, design: .monospaced))
+        .textSelection(.enabled)
+        .padding(6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.06)))
     }
 }
 

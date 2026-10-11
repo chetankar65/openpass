@@ -31,6 +31,8 @@ final class AppModel: ObservableObject {
     @Published var selectedID: Entry.ID?
     @Published var screen: Screen = .search
     @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
+    /// The one entry whose password is on screen, if any.
+    @Published private(set) var revealed: (id: Entry.ID, password: String)?
 
     private let paths = Paths.default
     private var identity: Identity?
@@ -38,6 +40,8 @@ final class AppModel: ObservableObject {
     private var watcher: OpenPassClient?
     private var statusTimer: Timer?
     private var noticeTask: Task<Void, Never>?
+    private var revealTask: Task<Void, Never>?
+    static let revealFor: TimeInterval = 30
     private let approvals = ApprovalPresenter()
 
     var filtered: [Entry] {
@@ -179,6 +183,7 @@ final class AppModel: ObservableObject {
             let next: Phase = !s.vaultPresent ? .noVault : (s.locked ? .locked : .unlocked)
             if next != .unlocked {
                 entries = []
+                hidePassword()
                 // A half-filled form must not survive a lock and reappear,
                 // password and all, after the next unlock.
                 screen = .search
@@ -236,6 +241,33 @@ final class AppModel: ObservableObject {
         } catch {
             handle(error)
         }
+    }
+
+    /// Shows an entry's password in its row, or hides it if it is already
+    /// showing. One at a time, and only briefly: a password left on screen is
+    /// one anyone walking past can read.
+    func toggleReveal(_ entry: Entry) async {
+        if revealed?.id == entry.id {
+            hidePassword()
+            return
+        }
+        guard let client else { return }
+        do {
+            let password = try await client.password(id: entry.id)
+            revealed = (entry.id, password)
+            revealTask?.cancel()
+            revealTask = Task {
+                try? await Task.sleep(nanoseconds: UInt64(Self.revealFor * 1_000_000_000))
+                if !Task.isCancelled { revealed = nil }
+            }
+        } catch {
+            handle(error)
+        }
+    }
+
+    func hidePassword() {
+        revealTask?.cancel()
+        revealed = nil
     }
 
     /// Adds an entry. Returns an error message for the form, or nil on success.
@@ -320,6 +352,7 @@ final class AppModel: ObservableObject {
             if e.isCode(OpenPassError.vaultLocked) {
                 phase = .locked
                 entries = []
+                hidePassword()
                 screen = .search
                 return
             }

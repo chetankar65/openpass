@@ -1,2 +1,5 @@
 # Build output; setup.sh and the READMEs build these from source.
 /bin/
+
+# Go installed by setup.sh when none was found.
+/.tools/

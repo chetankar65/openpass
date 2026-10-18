@@ -27,7 +27,7 @@ form, or generates a password for you.
 
 ## Setup
 
-Needs Go 1.27+, and on macOS the Xcode Command Line Tools.
+macOS or Linux, and a Chrome-family browser.
 
 ```bash
 git clone https://github.com/chetankar65/openpass
@@ -35,8 +35,10 @@ cd openpass
 ./setup.sh
 ```
 
-That one command builds everything, creates your vault, installs the menu bar
-app on macOS, and walks you through loading the browser extension.
+That one command installs whatever is missing (Go into `.tools/`, and on macOS
+the Xcode Command Line Tools), builds everything, creates your vault, installs
+the menu bar app on macOS, and walks you through loading the browser extension.
+Nothing needs `sudo`.
 
 Your **master password cannot be recovered**. There is no reset, by design.
 

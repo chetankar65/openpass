@@ -5,7 +5,7 @@ Reference for the CLI, client pairing, files, and the daemon. Setup is in the
 
 ## Commands
 
-Go 1.27+, macOS or Linux. `setup.sh` builds these; to do it by hand:
+Go 1.27+, macOS or Linux. `setup.sh` installs Go if needed and builds these; to do it by hand:
 
 ```bash
 go build -o bin/openpass        ./cmd/openpass
